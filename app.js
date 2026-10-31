@@ -98,17 +98,39 @@
     return answers;
   }
   function refreshVisibility(container, form) {
-    var answers = {}; container.querySelectorAll('[data-field-id]').forEach(function (block) {
-      var field = form.fields.find(function (f) { return f.id === block.getAttribute('data-field-id'); });
-      if (field) answers[field.id] = readBlockValue(block, field);
-    });
-    container.querySelectorAll('[data-field-id]').forEach(function (block) {
-      var field = form.fields.find(function (f) { return f.id === block.getAttribute('data-field-id'); });
-      if (!field) return;
-      var show = isVisible(field, answers);
+    /* Evaluate in form order, using only visible source answers, so a
+       hidden source cannot reveal a dependent field and a hidden middle
+       link hides the whole chain below it. */
+    var blocks = {};
+    container.querySelectorAll('[data-field-id]').forEach(function (block) { blocks[block.getAttribute('data-field-id')] = block; });
+    var visible = {};
+    form.fields.forEach(function (field) {
+      var block = blocks[field.id]; if (!block) return;
+      var show = true;
+      if (field.showIf) {
+        if (!visible[field.showIf.fieldId]) { show = false; }
+        else {
+          var srcBlock = blocks[field.showIf.fieldId];
+          var srcField = form.fields.find(function (f) { return f.id === field.showIf.fieldId; });
+          var srcVal = srcBlock ? readBlockValue(srcBlock, srcField) : undefined;
+          show = Array.isArray(srcVal) ? srcVal.indexOf(field.showIf.value) !== -1 : srcVal === field.showIf.value;
+        }
+      }
+      visible[field.id] = show;
       block.classList.toggle('hidden', !show);
       block.querySelectorAll('input, select, textarea').forEach(function (inp) { inp.disabled = !show; });
       if (!show) block.querySelectorAll('.err').forEach(function (e) { e.textContent = ''; });
+    });
+  }
+  function sanitizeConditionals(form) {
+    /* A conditional source must be an earlier dropdown/radio field. Drop
+       any rule that points at a missing, non-choice, or same-or-later field
+       (this happens when fields are reordered). */
+    form.fields.forEach(function (field, idx) {
+      if (!field.showIf) return;
+      var srcIdx = form.fields.findIndex(function (f) { return f.id === field.showIf.fieldId; });
+      var src = srcIdx === -1 ? null : form.fields[srcIdx];
+      if (!src || (src.type !== 'select' && src.type !== 'radio') || srcIdx >= idx) field.showIf = null;
     });
   }
   function renderFormInto(container, form, opts) {
@@ -119,29 +141,35 @@
     if (form.description) container.appendChild(el('p', 'desc', form.description));
     form.fields.forEach(function (field) {
       var block = el('div', 'fieldblock'); block.setAttribute('data-field-id', field.id);
-      var lab = el('label', null, field.label + (field.required ? ' *' : ''));
-      if (field.type !== 'radio' && field.type !== 'checkbox') lab.setAttribute('for', prefix + '-' + field.id);
-      block.appendChild(lab);
-      if (field.description) block.appendChild(el('p', 'desc', field.description));
       var input;
-      if (field.type === 'select') {
-        input = document.createElement('select'); input.id = prefix + '-' + field.id;
-        var blank = document.createElement('option'); blank.value = ''; blank.textContent = field.placeholder || 'Choose…'; input.appendChild(blank);
-        field.options.forEach(function (o) { var op = document.createElement('option'); op.value = o; op.textContent = o; input.appendChild(op); });
-      } else if (field.type === 'radio' || field.type === 'checkbox') {
+      if (field.type === 'radio' || field.type === 'checkbox') {
+        /* Group association for screen readers: fieldset + legend. */
+        var fs = document.createElement('fieldset');
+        var legend = document.createElement('legend'); legend.textContent = field.label + (field.required ? ' *' : ''); fs.appendChild(legend);
+        if (field.description) fs.appendChild(el('p', 'desc', field.description));
         var wrap = el('div', 'opts');
         field.options.forEach(function (o, i) {
           var l = el('label'); var inp = document.createElement('input'); inp.type = field.type; inp.name = prefix + '-' + field.id; inp.value = o; inp.id = prefix + '-' + field.id + '-' + i; l.appendChild(inp); l.appendChild(document.createTextNode(o)); wrap.appendChild(l);
         });
-        block.appendChild(wrap);
+        fs.appendChild(wrap); block.appendChild(fs);
       } else {
-        input = document.createElement(field.type === 'textarea' ? 'textarea' : 'input');
-        input.id = prefix + '-' + field.id;
-        if (field.type !== 'textarea') input.type = field.type;
-        if (field.placeholder) input.placeholder = field.placeholder;
-        if (field.type === 'number') { if (field.min !== null && field.min !== undefined) input.min = field.min; if (field.max !== null && field.max !== undefined) input.max = field.max; }
+        var lab = el('label', null, field.label + (field.required ? ' *' : ''));
+        lab.setAttribute('for', prefix + '-' + field.id);
+        block.appendChild(lab);
+        if (field.description) block.appendChild(el('p', 'desc', field.description));
+        if (field.type === 'select') {
+          input = document.createElement('select'); input.id = prefix + '-' + field.id;
+          var blank = document.createElement('option'); blank.value = ''; blank.textContent = field.placeholder || 'Choose…'; input.appendChild(blank);
+          field.options.forEach(function (o) { var op = document.createElement('option'); op.value = o; op.textContent = o; input.appendChild(op); });
+        } else {
+          input = document.createElement(field.type === 'textarea' ? 'textarea' : 'input');
+          input.id = prefix + '-' + field.id;
+          if (field.type !== 'textarea') input.type = field.type;
+          if (field.placeholder) input.placeholder = field.placeholder;
+          if (field.type === 'number') { if (field.min !== null && field.min !== undefined) input.min = field.min; if (field.max !== null && field.max !== undefined) input.max = field.max; }
+        }
+        block.appendChild(input);
       }
-      if (input) block.appendChild(input);
       var errEl = el('p', 'err', ''); errEl.setAttribute('role', 'alert'); block.appendChild(errEl);
       container.appendChild(block);
     });
@@ -238,7 +266,7 @@
       card.draggable = true; card.setAttribute('data-index', idx); card.setAttribute('data-field-id', field.id);
       card.addEventListener('dragstart', function (e) { e.dataTransfer.setData('text/plain', String(idx)); });
       card.addEventListener('dragover', function (e) { e.preventDefault(); });
-      card.addEventListener('drop', function (e) { e.preventDefault(); var from = Number(e.dataTransfer.getData('text/plain')); if (isNaN(from) || from === idx) return; var moved = form.fields.splice(from, 1)[0]; form.fields.splice(idx, 0, moved); form.updatedAt = new Date().toISOString(); putForm(form).then(renderBuilder); });
+      card.addEventListener('drop', function (e) { e.preventDefault(); var from = Number(e.dataTransfer.getData('text/plain')); if (isNaN(from) || from === idx) return; var moved = form.fields.splice(from, 1)[0]; form.fields.splice(idx, 0, moved); sanitizeConditionals(form); form.updatedAt = new Date().toISOString(); putForm(form).then(renderBuilder); });
       var head = el('header');
       head.appendChild(el('span', 'drag', '⠿ ' + field.label));
       head.appendChild(el('span', 'mini', typeLabel(field.type) + (field.required ? ' · Required' : '') + (field.showIf ? ' · Conditional' : '')));
@@ -247,8 +275,8 @@
       var acts = el('div', 'actions');
       var mk = function (label, fn) { var b = el('button', null, label); b.addEventListener('click', fn); acts.appendChild(b); };
       mk('Edit', function () { state.selectedFieldId = field.id; renderBuilder(); });
-      mk('Move up', function () { if (idx === 0) return; var m = form.fields.splice(idx, 1)[0]; form.fields.splice(idx - 1, 0, m); putForm(form).then(renderBuilder); });
-      mk('Move down', function () { if (idx === form.fields.length - 1) return; var m = form.fields.splice(idx, 1)[0]; form.fields.splice(idx + 1, 0, m); putForm(form).then(renderBuilder); });
+      mk('Move up', function () { if (idx === 0) return; var m = form.fields.splice(idx, 1)[0]; form.fields.splice(idx - 1, 0, m); sanitizeConditionals(form); putForm(form).then(renderBuilder); });
+      mk('Move down', function () { if (idx === form.fields.length - 1) return; var m = form.fields.splice(idx, 1)[0]; form.fields.splice(idx + 1, 0, m); sanitizeConditionals(form); putForm(form).then(renderBuilder); });
       mk('Duplicate', function () { var c = JSON.parse(JSON.stringify(field)); c.id = uid(); c.label = field.label + ' (copy)'; c.showIf = null; form.fields.splice(idx + 1, 0, c); putForm(form).then(renderBuilder); });
       mk('Delete', function () { form.fields = form.fields.filter(function (f) { return f.id !== field.id; }); form.fields.forEach(function (f) { if (f.showIf && f.showIf.fieldId === field.id) f.showIf = null; }); if (state.selectedFieldId === field.id) state.selectedFieldId = null; putForm(form).then(renderBuilder); });
       card.appendChild(acts); canvas.appendChild(card);
@@ -269,7 +297,10 @@
     if (field.type === 'number') { $('propMin').value = field.min === null || field.min === undefined ? '' : field.min; $('propMax').value = field.max === null || field.max === undefined ? '' : field.max; }
     var condSel = $('propCondField'); condSel.innerHTML = '';
     var none = document.createElement('option'); none.value = ''; none.textContent = 'Always show'; condSel.appendChild(none);
-    form.fields.forEach(function (f) { if (f.id === field.id) return; if (f.type === 'select' || f.type === 'radio') { var o = document.createElement('option'); o.value = f.id; o.textContent = f.label; if (field.showIf && field.showIf.fieldId === f.id) o.selected = true; condSel.appendChild(o); } });
+    /* Only earlier dropdown/radio fields can be a source: a field cannot
+       depend on a field the user has not answered yet. */
+    var selfIdx = form.fields.findIndex(function (f) { return f.id === field.id; });
+    form.fields.forEach(function (f, i) { if (i >= selfIdx) return; if (f.type === 'select' || f.type === 'radio') { var o = document.createElement('option'); o.value = f.id; o.textContent = f.label; if (field.showIf && field.showIf.fieldId === f.id) o.selected = true; condSel.appendChild(o); } });
     rebuildCondValues(field, form);
     pf.dataset.fieldId = field.id;
   }
@@ -414,7 +445,7 @@
   function buildStandalone(form) {
     var fieldsJson = JSON.stringify(form.fields).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
     var title = escHtml(form.title); var desc = escHtml(form.description || '');
-    return '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>' + title + '</title>\n<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1c1917}label{display:block;font-weight:700;margin-top:1rem}input,select,textarea{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:12px;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1rem;border-radius:12px;border:0;background:#6d28d9;color:#fff;cursor:pointer}.err{color:#b91c1c;font-weight:600}.hidden{display:none}.opts label{font-weight:400;display:flex;gap:.5rem}.opts input{width:auto}small{color:#57534e}</style>\n</head>\n<body>\n<h1>' + title + '</h1>\n' + (desc ? '<p>' + desc + '</p>\n' : '') + '<p><small>This standalone form runs entirely on your device. It does not send your answers anywhere. Export them below when done.</small></p>\n<form id="f" novalidate></form>\n<button type="button" id="expJson">Download answers (JSON)</button>\n<button type="button" id="expCsv">Download answers (CSV)</button>\n<script>\nvar FIELDS=' + fieldsJson + ';\nvar form=document.getElementById("f");\nfunction esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}\nfunction visible(field,ans){if(!field.showIf)return true;var v=ans[field.showIf.fieldId];return Array.isArray(v)?v.indexOf(field.showIf.value)!==-1:v===field.showIf.value}\nfunction blockVal(b,field){if(field.type==="checkbox"){var o=[];b.querySelectorAll("input:checked").forEach(function(c){o.push(c.value)});return o}if(field.type==="radio"){var r=b.querySelector("input:checked");return r?r.value:""}var i=b.querySelector("input,select,textarea");return i?i.value:""}\nfunction collect(){var a={};document.querySelectorAll("[data-fid]").forEach(function(b){if(b.classList.contains("hidden"))return;a[b.getAttribute("data-fid")]=blockVal(b,FIELDS.find(function(x){return x.id===b.getAttribute("data-fid")}))});return a}\nfunction refresh(){var a=collect();document.querySelectorAll("[data-fid]").forEach(function(b){var fld=FIELDS.find(function(x){return x.id===b.getAttribute("data-fid")});var show=visible(fld,a);b.classList.toggle("hidden",!show);b.querySelectorAll("input,select,textarea").forEach(function(i){i.disabled=!show})})}\nFIELDS.forEach(function(field){var b=document.createElement("div");b.setAttribute("data-fid",field.id);var l=document.createElement("label");l.textContent=field.label+(field.required?" *":"");b.appendChild(l);if(field.description){var d=document.createElement("small");d.textContent=field.description;b.appendChild(d)}\nif(field.type==="select"){var s=document.createElement("select");var bl=document.createElement("option");bl.value="";bl.textContent=field.placeholder||"Choose…";s.appendChild(bl);field.options.forEach(function(o){var op=document.createElement("option");op.value=o;op.textContent=o;s.appendChild(op)});b.appendChild(s)}else if(field.type==="radio"||field.type==="checkbox"){var w=document.createElement("div");w.className="opts";field.options.forEach(function(o){var lb=document.createElement("label");var inp=document.createElement("input");inp.type=field.type;inp.name=field.id;inp.value=o;lb.appendChild(inp);lb.appendChild(document.createTextNode(o));w.appendChild(lb)});b.appendChild(w)}else{var inp2=document.createElement(field.type==="textarea"?"textarea":"input");if(field.type!=="textarea")inp2.type=field.type;if(field.placeholder)inp2.placeholder=field.placeholder;b.appendChild(inp2)}\nvar e=document.createElement("p");e.className="err";e.setAttribute("role","alert");b.appendChild(e);form.appendChild(b)});\nvar sub=document.createElement("button");sub.type="submit";sub.textContent="Check answers";form.appendChild(sub);\nform.addEventListener("input",refresh);form.addEventListener("change",refresh);refresh();\nform.addEventListener("submit",function(ev){ev.preventDefault();var ans=collect();var ok=true;document.querySelectorAll("[data-fid]").forEach(function(b){if(b.classList.contains("hidden"))return;var fld=FIELDS.find(function(x){return x.id===b.getAttribute("data-fid")});var v=ans[fld.id];var empty=v===""||v==null||(Array.isArray(v)&&!v.length);var err="";if(empty&&fld.required)err="This field is required.";else if(fld.type==="email"&&v&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v))err="Enter a valid email address.";else if(fld.type==="number"&&v!==""){var n=Number(v);if(isNaN(n))err="Enter a number.";else if(fld.min!=null&&n<fld.min)err="Must be at least "+fld.min+".";else if(fld.max!=null&&n>fld.max)err="Must be at most "+fld.max+"."}\nb.querySelector(".err").textContent=err;if(err)ok=false});if(ok)alert("All visible answers look valid. Use the export buttons to download them.")});\nfunction dl(name,txt){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));a.download=name;a.click()}\ndocument.getElementById("expJson").onclick=function(){dl("answers.json",JSON.stringify(collect(),null,2))};\ndocument.getElementById("expCsv").onclick=function(){function q(v){var s=v==null?"":String(v);return /[",\\n\\r]/.test(s)?\'"\'+s.replace(/"/g,\'""\')+\'"\':s}var a=collect();var h=FIELDS.map(function(f){return q(f.label)}).join(",");var row=FIELDS.map(function(f){var v=a[f.id];return q(Array.isArray(v)?v.join("; "):(v==null?"":v))}).join(",");dl("answers.csv",h+"\\r\\n"+row)};\n<\/script>\n</body>\n</html>\n';
+    return '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>' + title + '</title>\n<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1c1917}label{display:block;font-weight:700;margin-top:1rem}input,select,textarea{width:100%;padding:.5rem;border:1px solid #ccc;border-radius:12px;box-sizing:border-box}button{margin-top:1rem;padding:.6rem 1rem;border-radius:12px;border:0;background:#6d28d9;color:#fff;cursor:pointer}.err{color:#b91c1c;font-weight:600}.hidden{display:none}.opts label{font-weight:400;display:flex;gap:.5rem}.opts input{width:auto}small{color:#57534e}fieldset{border:0;margin:0;padding:0}legend{font-weight:700}</style>\n</head>\n<body>\n<h1>' + title + '</h1>\n' + (desc ? '<p>' + desc + '</p>\n' : '') + '<p><small>This standalone form runs entirely on your device. It does not send your answers anywhere. Export them below when done.</small></p>\n<form id="f" novalidate></form>\n<button type="button" id="expJson">Download answers (JSON)</button>\n<button type="button" id="expCsv">Download answers (CSV)</button>\n<script>\nvar FIELDS=' + fieldsJson + ';\nvar form=document.getElementById("f");\nfunction esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}\nfunction visible(field,ans){if(!field.showIf)return true;var v=ans[field.showIf.fieldId];return Array.isArray(v)?v.indexOf(field.showIf.value)!==-1:v===field.showIf.value}\nfunction blockVal(b,field){if(field.type==="checkbox"){var o=[];b.querySelectorAll("input:checked").forEach(function(c){o.push(c.value)});return o}if(field.type==="radio"){var r=b.querySelector("input:checked");return r?r.value:""}var i=b.querySelector("input,select,textarea");return i?i.value:""}\nfunction collect(){var a={};document.querySelectorAll("[data-fid]").forEach(function(b){if(b.classList.contains("hidden"))return;a[b.getAttribute("data-fid")]=blockVal(b,FIELDS.find(function(x){return x.id===b.getAttribute("data-fid")}))});return a}\nfunction refresh(){var vis={};FIELDS.forEach(function(fld){var b=document.querySelector(\'[data-fid="\' + fld.id + \'"]\');if(!b)return;var show=true;if(fld.showIf){if(!vis[fld.showIf.fieldId])show=false;else{var sb=document.querySelector(\'[data-fid="\' + fld.showIf.fieldId + \'"]\');var sf=FIELDS.find(function(x){return x.id===fld.showIf.fieldId});var v=sb?blockVal(sb,sf):undefined;show=Array.isArray(v)?v.indexOf(fld.showIf.value)!==-1:v===fld.showIf.value}}vis[fld.id]=show;b.classList.toggle("hidden",!show);b.querySelectorAll("input,select,textarea").forEach(function(i){i.disabled=!show})})}\nFIELDS.forEach(function(field){var b=document.createElement("div");b.setAttribute("data-fid",field.id);var host=b;if(field.type==="radio"||field.type==="checkbox"){var fs2=document.createElement("fieldset");var lg=document.createElement("legend");lg.textContent=field.label+(field.required?" *":"");fs2.appendChild(lg);if(field.description){var d=document.createElement("small");d.textContent=field.description;fs2.appendChild(d)}b.appendChild(fs2);host=fs2}else{var l=document.createElement("label");l.textContent=field.label+(field.required?" *":"");b.appendChild(l);if(field.description){var d=document.createElement("small");d.textContent=field.description;b.appendChild(d)}}\nif(field.type==="select"){var s=document.createElement("select");var bl=document.createElement("option");bl.value="";bl.textContent=field.placeholder||"Choose…";s.appendChild(bl);field.options.forEach(function(o){var op=document.createElement("option");op.value=o;op.textContent=o;s.appendChild(op)});b.appendChild(s)}else if(field.type==="radio"||field.type==="checkbox"){var w=document.createElement("div");w.className="opts";field.options.forEach(function(o){var lb=document.createElement("label");var inp=document.createElement("input");inp.type=field.type;inp.name=field.id;inp.value=o;lb.appendChild(inp);lb.appendChild(document.createTextNode(o));w.appendChild(lb)});host.appendChild(w)}else{var inp2=document.createElement(field.type==="textarea"?"textarea":"input");if(field.type!=="textarea")inp2.type=field.type;if(field.placeholder)inp2.placeholder=field.placeholder;b.appendChild(inp2)}\nvar e=document.createElement("p");e.className="err";e.setAttribute("role","alert");b.appendChild(e);form.appendChild(b)});\nvar sub=document.createElement("button");sub.type="submit";sub.textContent="Check answers";form.appendChild(sub);\nform.addEventListener("input",refresh);form.addEventListener("change",refresh);refresh();\nfunction validateAll(){var ans=collect();var ok=true;document.querySelectorAll("[data-fid]").forEach(function(b){if(b.classList.contains("hidden"))return;var fld=FIELDS.find(function(x){return x.id===b.getAttribute("data-fid")});var v=ans[fld.id];var empty=v===""||v==null||(Array.isArray(v)&&!v.length);var err="";if(empty){if(fld.required)err="This field is required."}else if(fld.type==="email"&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))err="Enter a valid email address.";else if(fld.type==="number"){var n=Number(v);if(isNaN(n))err="Enter a number.";else if(fld.min!=null&&n<fld.min)err="Must be at least "+fld.min+".";else if(fld.max!=null&&n>fld.max)err="Must be at most "+fld.max+".";}else if(fld.type==="text"||fld.type==="textarea"){if(fld.minLength!=null&&v.length<fld.minLength)err="Must be at least "+fld.minLength+" characters.";else if(fld.maxLength!=null&&v.length>fld.maxLength)err="Must be at most "+fld.maxLength+" characters.";}else if(fld.type==="date"&&isNaN(Date.parse(v)))err="Enter a valid date.";else if(fld.type==="select"||fld.type==="radio"||fld.type==="checkbox"){var vals=Array.isArray(v)?v:[v];if(vals.some(function(x){return fld.options.indexOf(x)===-1}))err="Choose one of the listed options.";}b.querySelector(".err").textContent=err;if(err)ok=false});return ok}form.addEventListener("submit",function(ev){ev.preventDefault();if(validateAll())alert("All visible answers look valid. Use the export buttons to download them.")});\nfunction dl(name,txt){var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));a.download=name;a.click()}\ndocument.getElementById("expJson").onclick=function(){if(!validateAll()){alert("Fix the errors above before exporting.");return}dl("answers.json",JSON.stringify(collect(),null,2))};\ndocument.getElementById("expCsv").onclick=function(){if(!validateAll()){alert("Fix the errors above before exporting.");return}function q(v){var s=v==null?"":String(v);return /[",\\n\\r]/.test(s)?\'"\'+s.replace(/"/g,\'""\')+\'"\':s}var a=collect();var h=FIELDS.map(function(f){return q(f.label)}).join(",");var row=FIELDS.map(function(f){var v=a[f.id];return q(Array.isArray(v)?v.join("; "):(v==null?"":v))}).join(",");dl("answers.csv",h+"\\r\\n"+row)};\n<\/script>\n</body>\n</html>\n';
   }
 
   /* ---------- Events ---------- */

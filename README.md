@@ -57,7 +57,10 @@ example `python3 -m http.server 8000`, then open http://localhost:8000/.
    values, and confirm each error appears next to its field.
 3. Add a dropdown, then a second field shown only when one dropdown answer is
    chosen. Fill the form with the other answer and confirm the second field
-   stays hidden and is not required.
+   stays hidden and is not required. Conditional sources are earlier
+   dropdown/radio fields only; reordering a field above its source removes
+   the rule, and hiding a middle link in a chain hides everything below it,
+   with no hidden answers stored.
 4. Submit a valid response, reload the page, and confirm the form and the
    response are still there.
 5. In Responses, search for a word from an answer, delete one response, and
@@ -67,6 +70,9 @@ example `python3 -m http.server 8000`, then open http://localhost:8000/.
    forms and responses return. Import a corrupt JSON file and a backup with
    version 2, and confirm both are rejected with your data unchanged.
 7. Download the standalone form, open it, complete it, and export its answers.
+   Try exporting with an invalid answer first and confirm the export is
+   blocked until the errors are fixed. Radio and checkbox questions use a
+   fieldset with a legend in both the main app and the standalone form.
 8. Resize to 320 px wide and confirm there is no horizontal scrolling and no
    inaccessible controls, and tab through the builder and the fill view to
    confirm visible focus, keyboard-operable reordering (Move up / Move down),
