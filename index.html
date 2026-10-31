@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FormForge — Beautiful Forms, Zero Backend</title>
+<meta name="description" content="FormForge is a privacy-first form builder. Create forms, collect responses on your own device, and export them. No accounts, no servers.">
+<link rel="stylesheet" href="style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">F</span>
+    <div><strong>FormForge</strong><span class="tagline">Beautiful forms, zero backend</span></div>
+  </div>
+  <nav class="mainnav" aria-label="Main views">
+    <button type="button" data-view="dashboard" class="navbtn active" aria-current="page">Dashboard</button>
+    <button type="button" data-view="builder" class="navbtn">Builder</button>
+    <button type="button" data-view="fill" class="navbtn">Fill form</button>
+    <button type="button" data-view="responses" class="navbtn">Responses</button>
+  </nav>
+  <div class="topactions">
+    <button type="button" id="exportBackupBtn">Export backup</button>
+    <label class="filebtn" for="importBackupInput">Import backup</label>
+    <input type="file" id="importBackupInput" accept="application/json,.json" class="sr-only">
+    <button type="button" id="themeBtn" aria-label="Toggle dark mode">Dark mode</button>
+  </div>
+</header>
+
+<main>
+  <p id="statusMsg" class="status" role="status" aria-live="polite"></p>
+
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" class="view" aria-labelledby="dashTitle">
+    <div class="pagehead">
+      <div>
+        <h1 id="dashTitle">Your forms</h1>
+        <p class="lede">Everything stays in this browser, in IndexedDB. No account, no server, no tracking.</p>
+      </div>
+      <button type="button" id="newFormBtn" class="primary">Create form</button>
+    </div>
+    <label class="searchlabel" for="formSearch">Search forms</label>
+    <input type="search" id="formSearch" placeholder="Search by form title">
+    <div id="formList" class="cardgrid"></div>
+    <p id="formEmpty" class="empty">No forms yet. Create your first form to get started.</p>
+  </section>
+
+  <!-- BUILDER -->
+  <section id="view-builder" class="view hidden" aria-labelledby="buildTitle">
+    <div class="pagehead">
+      <div>
+        <h1 id="buildTitle">Form builder</h1>
+        <p class="lede">Add fields from the palette, select a field to edit it, drag or use the arrow buttons to reorder.</p>
+      </div>
+      <div class="row">
+        <label for="builderFormSelect">Editing</label>
+        <select id="builderFormSelect" aria-label="Form to edit"></select>
+        <button type="button" id="previewBtn" class="primary">Preview and fill</button>
+      </div>
+    </div>
+    <div class="buildergrid">
+      <aside class="panel" aria-label="Field palette">
+        <h2>Add a field</h2>
+        <div id="palette" class="palette"></div>
+        <label for="formTitleInput">Form title</label>
+        <input type="text" id="formTitleInput" maxlength="120">
+        <label for="formDescInput">Form description</label>
+        <textarea id="formDescInput" rows="3" maxlength="500"></textarea>
+        <button type="button" id="downloadStandaloneBtn">Download standalone form</button>
+        <p class="hint">The standalone file is a single HTML page you can send to someone. They complete it on their own device and export their answers. It never sends anything to a server, and it does not collect responses for you centrally.</p>
+      </aside>
+      <section class="panel" aria-label="Form canvas">
+        <h2>Canvas</h2>
+        <p class="hint">Click a field to edit it on the right. Drag a field by its handle, or use Move up / Move down.</p>
+        <div id="canvas" class="canvas"></div>
+        <p id="canvasEmpty" class="empty">No fields yet. Add one from the palette.</p>
+      </section>
+      <aside class="panel" aria-label="Field properties">
+        <h2>Field settings</h2>
+        <div id="propsEmpty" class="empty">Select a field on the canvas to edit it.</div>
+        <form id="propsForm" class="props hidden" novalidate>
+          <label for="propLabel">Label</label>
+          <input type="text" id="propLabel" maxlength="120" required>
+          <label for="propDesc">Description</label>
+          <textarea id="propDesc" rows="2" maxlength="300"></textarea>
+          <label for="propPlaceholder">Placeholder</label>
+          <input type="text" id="propPlaceholder" maxlength="120">
+          <label class="check"><input type="checkbox" id="propRequired"> Required</label>
+          <div id="propOptionsWrap" class="hidden">
+            <label for="propOptions">Choices, one per line</label>
+            <textarea id="propOptions" rows="4"></textarea>
+          </div>
+          <div id="propTextWrap" class="hidden">
+            <label for="propMinLen">Minimum length (optional)</label>
+            <input type="number" id="propMinLen" min="0" inputmode="numeric">
+            <label for="propMaxLen">Maximum length (optional)</label>
+            <input type="number" id="propMaxLen" min="1" inputmode="numeric">
+          </div>
+          <div id="propNumWrap" class="hidden">
+            <label for="propMin">Minimum value (optional)</label>
+            <input type="number" id="propMin" inputmode="decimal">
+            <label for="propMax">Maximum value (optional)</label>
+            <input type="number" id="propMax" inputmode="decimal">
+          </div>
+          <label for="propCondField">Show this field only when</label>
+          <select id="propCondField"><option value="">Always show</option></select>
+          <label for="propCondValue">Has this answer</label>
+          <select id="propCondValue"></select>
+          <button type="button" id="deleteFieldBtn" class="danger">Delete field</button>
+        </form>
+      </aside>
+    </div>
+    <section class="panel previewpanel" aria-label="Live preview">
+      <div class="pagehead">
+        <h2>Live preview</h2>
+        <div class="row" role="group" aria-label="Preview width">
+          <button type="button" id="previewDesktopBtn" class="primary">Desktop</button>
+          <button type="button" id="previewMobileBtn">Mobile</button>
+        </div>
+      </div>
+      <p class="hint">Preview only. Nothing you type here is saved as a response. Use "Preview and fill" to submit a real response.</p>
+      <div id="previewWrap" class="previewwrap desktop"><div id="previewForm"></div></div>
+    </section>
+  </section>
+
+  <!-- FILL -->
+  <section id="view-fill" class="view hidden" aria-labelledby="fillTitle">
+    <div class="pagehead">
+      <div>
+        <h1 id="fillTitle">Fill a form</h1>
+        <p class="lede">Responses are saved only on this device.</p>
+      </div>
+      <div class="row">
+        <label for="fillFormSelect">Form</label>
+        <select id="fillFormSelect" aria-label="Form to fill"></select>
+      </div>
+    </div>
+    <form id="fillForm" class="panel formrender" novalidate></form>
+    <p id="fillEmpty" class="empty hidden">No form selected, or the selected form has no fields yet. Build a form first.</p>
+  </section>
+
+  <!-- RESPONSES -->
+  <section id="view-responses" class="view hidden" aria-labelledby="respTitle">
+    <div class="pagehead">
+      <div>
+        <h1 id="respTitle">Responses</h1>
+        <p class="lede">Stored only on this device. Export CSV any time.</p>
+      </div>
+      <div class="row">
+        <label for="respFormSelect">Form</label>
+        <select id="respFormSelect" aria-label="Form whose responses to show"></select>
+        <button type="button" id="exportCsvBtn" class="primary">Export CSV</button>
+      </div>
+    </div>
+    <label class="searchlabel" for="respSearch">Search responses</label>
+    <input type="search" id="respSearch" placeholder="Search answers">
+    <div id="respList"></div>
+    <p id="respEmpty" class="empty">No responses for this form yet.</p>
+  </section>
+</main>
+
+<footer class="footer">
+  <p>FormForge stores forms and responses in this browser only (IndexedDB). Export a JSON backup to keep a copy, and import it to restore. No accounts, no servers, no external APIs.</p>
+</footer>
+<script src="app.js"></script>
+</body>
+</html>
